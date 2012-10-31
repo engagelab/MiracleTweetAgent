@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" 
+					   xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="initApp(event)">
+	<fx:Metadata>
+		[ResourceBundle("resources")]
+	</fx:Metadata>
+	
+	<fx:Script>
+		<![CDATA[
+			import com.adobe.serialization.json.JSON;
+			import com.seesmic.as3.xmpp.JID;
+			import com.seesmic.as3.xmpp.XMPP;
+			import com.seesmic.as3.xmpp.XMPPEvent;
+			import com.seesmic.as3.xmpp.xep.muc.MUC;
+			
+			import mx.events.FlexEvent;
+			
+			private var conn:XMPP;
+			
+			protected function initApp(event:FlexEvent):void {
+				conn = new XMPP();
+				conn.auto_reconnect = true;
+				conn.setJID(resourceManager.getString('resources', 'TWEET_AGENT')+"@"+resourceManager.getString('resources', 'XMPP_SERVER')+"/"+resourceManager.getString('resources', 'TWEET_AGENT'));
+				conn.setPassword(resourceManager.getString('resources', 'XMPP_CLIENT_DEFAULT_PASSWORD'));
+				conn.setServer(resourceManager.getString('resources', 'XMPP_SERVER'));
+				conn.addEventListener(XMPPEvent.SESSION, handleSession);
+				
+				conn.addPlugin(new MUC());
+				
+				conn.connect();
+			}
+			
+			private final function handleSession(e:XMPPEvent):void {
+				outputArea.text =  "Agent successfully connected to Openfire. Now listening...";
+				
+				conn.addEventListener(XMPPEvent.MESSAGE_MUC, handleMUCMessage);
+				conn.plugin['muc'].joinRoom('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_ROOM_NAME'), resourceManager.getString('resources', 'TWEET_AGENT'));
+				conn.plugin['muc'].joinRoom('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), resourceManager.getString('resources', 'TWEET_AGENT'));
+			}
+			
+			private function handleMUCMessage(e:XMPPEvent):void {
+				if(!e.stanza.body) {
+					return;
+				}
+				
+				switch(new String(e.stanza.from.user)) {
+					case resourceManager.getString('resources', 'TWEETS_ROOM_NAME'):
+						//extract some variables from the XMPP message
+						var roomjid:JID = JID(e.stanza.from);
+						var mess:String = "Message: from "+ e.stanza.from + "\n**********************";
+						
+						var cstate:String = null;
+						var newMess:Boolean = true;
+						
+						//check whether the message is "old" or is of type "system"
+						if(roomjid.getResource() != "") {
+							var xm:XML = e.stanza.xml as XML;
+							for each (var i:XML in xm.elements()) {
+								if(i.name() == "urn:xmpp:delay::delay") {
+									newMess = false;
+								}
+							}
+						}
+						else {
+							cstate = "system";
+						}
+						
+						if(cstate != "system" && newMess) {
+							var isPostOK:Boolean = postTweetToService(new String(e.stanza.body), new String(e.stanza.from.resource));
+							
+							if(isPostOK) {
+								outputArea.text =  mess + "\n" + outputArea.text;
+							}
+							else {
+								outputArea.text =  "WRONG MESSAGE FORMAT - missing RT user\n" + outputArea.text;
+							}
+							
+						}
+						break;
+					
+					case resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'):
+						
+						break;
+				}
+			}
+			
+			/**
+			 * 
+			 * Function to return a clean "from" user (without '-pad')
+			 * 
+			 **/
+			protected function cleanResource(initialFrom:String):String {
+				initialFrom = initialFrom.split("-")[0];
+				return initialFrom;
+			}
+			
+			protected function postTweetToService(message:String, creator:String):Boolean {
+				var extractedOwnerName:String = cleanResource(extractOwner(message).toLowerCase());
+				
+				if(extractedOwnerName != "") {
+					var urlRequest:URLRequest = new URLRequest(resourceManager.getString('resources', 'TWEET_SERVER_URL')+"/tweet");
+					urlRequest.method = URLRequestMethod.POST;
+					urlRequest.contentType = "application/json";
+					var params:Object = new Object();
+					params.userName = cleanResource(creator.toLowerCase());
+					params.ownerName = extractedOwnerName;
+					params.text = cleanMessage(message);
+					params.xpos = 0;
+					params.ypos = 0;
+					params.isVisible = true;
+					params.isPortfolio = false;
+					params.source = false;
+					urlRequest.data = com.adobe.serialization.json.JSON.encode(params);
+					
+					var loader:URLLoader = new URLLoader();
+					loader.addEventListener(Event.COMPLETE, completeHandler);
+					loader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, securityErrorHandler);
+					loader.addEventListener(HTTPStatusEvent.HTTP_STATUS, httpStatusHandler);
+					loader.addEventListener(IOErrorEvent.IO_ERROR, ioErrorHandler);
+					loader.load(urlRequest);
+					return true;
+				}
+				else {
+					return false;
+				}
+			}
+			
+			protected function completeHandler(evt:Event):void {
+				//result example: {"userName":"lilla","text":"12","xpos":0,"ypos":0,"isVisible":true,"isPortfolio":false,"source":false}
+				var res:Object = com.adobe.serialization.json.JSON.decode(String(evt.target.data));
+				conn.plugin['muc'].sendMessage('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), '{"userName":"'+res.userName+'", "messageType":"'+resourceManager.getString('resources', 'TWEET_POST_SUCCESSFUL')+'"}', null);
+			}
+			
+			protected function securityErrorHandler(evt:SecurityErrorEvent):void {
+				trace("securityErrorHandler");
+			}
+			
+			protected function httpStatusHandler(evt:HTTPStatusEvent):void {
+				trace("httpStatusHandler");
+			}
+			
+			protected function ioErrorHandler(evt:IOErrorEvent):void {
+				trace("ioErrorHandler");
+			}
+			
+			protected function extractOwner(message:String):String {
+				var strongRegExp:RegExp = /RT_(.*?):/;
+				var matches:Object = strongRegExp.exec(message);
+				if(matches != null) {
+					return new String(matches[1]);
+				}
+				else {
+					return "";
+				}
+			}
+			
+			/**
+			 *
+			 * Remove the RT_*: from the message body
+			 * 
+			 **/
+			protected function cleanMessage(message:String):String {
+				var strongRegExp:RegExp = /RT_(.*?):/;
+				return message.replace(strongRegExp, "");
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<s:TextArea top="10" left="10" right="10" bottom="10" id="outputArea" />
+
+</s:WindowedApplication>
