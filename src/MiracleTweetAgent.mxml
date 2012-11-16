@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" 
 					   xmlns:s="library://ns.adobe.com/flex/spark" 
-					   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="initApp(event)">
+					   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="getEnergies.send();">
 	<fx:Metadata>
 		[ResourceBundle("resources")]
 	</fx:Metadata>
+	
+	<fx:Declarations>
+		<fx:Array id="hashTags" />
+		<s:HTTPService url="{resourceManager.getString('resources', 'TWEET_SERVER_URL') + '/energySources'}" 
+					   method="GET" headers="{'pragma', 'no-cache'}" result="getEnergies_resultHandler(event)" fault="getEnergies_faultHandler(event)" resultFormat="text" id="getEnergies" showBusyCursor="true" />
+	</fx:Declarations>
 	
 	<fx:Script>
 		<![CDATA[
@@ -14,22 +20,13 @@
 			import com.seesmic.as3.xmpp.XMPPEvent;
 			import com.seesmic.as3.xmpp.xep.muc.MUC;
 			
+			import listeners.HashCreatorEvent;
+			
 			import mx.events.FlexEvent;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
 			
 			private var conn:XMPP;
-			
-			protected function initApp(event:FlexEvent):void {
-				conn = new XMPP();
-				conn.auto_reconnect = true;
-				conn.setJID(resourceManager.getString('resources', 'TWEET_AGENT')+"@"+resourceManager.getString('resources', 'XMPP_SERVER')+"/"+resourceManager.getString('resources', 'TWEET_AGENT'));
-				conn.setPassword(resourceManager.getString('resources', 'XMPP_CLIENT_DEFAULT_PASSWORD'));
-				conn.setServer(resourceManager.getString('resources', 'XMPP_SERVER'));
-				conn.addEventListener(XMPPEvent.SESSION, handleSession);
-				
-				conn.addPlugin(new MUC());
-				
-				conn.connect();
-			}
 			
 			private final function handleSession(e:XMPPEvent):void {
 				outputArea.text =  "Agent successfully connected to Openfire. Now listening...";
@@ -67,15 +64,11 @@
 						}
 						
 						if(cstate != "system" && newMess) {
-							var isPostOK:Boolean = postTweetToService(new String(e.stanza.body), new String(e.stanza.from.resource));
-							
-							if(isPostOK) {
-								outputArea.text =  mess + "\n" + outputArea.text;
-							}
-							else {
-								outputArea.text =  "WRONG MESSAGE FORMAT - missing RT user\n" + outputArea.text;
-							}
-							
+							var hc:HashCreator = new HashCreator();
+							hc.addEventListener(HashCreatorEvent.POST_SUCCESSFUL, handlePostSuccessful);
+							hc.addEventListener(HashCreatorEvent.POST_FAILED, handlePostFailure);
+							hc.addEventListener(HashCreatorEvent.NO_HASH_FOUND, handleNoPost);
+							hc.postHashToService(new String(e.stanza.body), new String(e.stanza.from.resource), resourceManager.getString('resources', 'TWEET_SERVER_URL')+"/tweet", hashTags);
 						}
 						break;
 					
@@ -86,85 +79,67 @@
 			}
 			
 			/**
-			 * 
-			 * Function to return a clean "from" user (without '-pad')
+			 *
+			 * Called when the tweetUpdater is successful
 			 * 
 			 **/
-			protected function cleanResource(initialFrom:String):String {
-				initialFrom = initialFrom.split("-")[0];
-				return initialFrom;
+			protected function handlePostSuccessful(evt:HashCreatorEvent):void {
+				//we're happy, it worked
+				var res:Object = com.adobe.serialization.json.JSON.decode(new String(evt.result));
+				conn.plugin['muc'].sendMessage('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), '{"tag":"'+res.tag+'", "messageType":"'+resourceManager.getString('resources', 'TWEET_POST_SUCCESSFUL')+'"}', null);
 			}
 			
-			protected function postTweetToService(message:String, creator:String):Boolean {
-				var extractedOwnerName:String = cleanResource(extractOwner(message).toLowerCase());
-				
-				if(extractedOwnerName != "") {
-					var urlRequest:URLRequest = new URLRequest(resourceManager.getString('resources', 'TWEET_SERVER_URL')+"/tweet");
-					urlRequest.method = URLRequestMethod.POST;
-					urlRequest.contentType = "application/json";
-					var params:Object = new Object();
-					params.userName = cleanResource(creator.toLowerCase());
-					params.ownerName = extractedOwnerName;
-					params.text = cleanMessage(message);
-					params.xpos = 0;
-					params.ypos = 0;
-					params.isVisible = true;
-					params.isPortfolio = false;
-					params.source = false;
-					urlRequest.data = com.adobe.serialization.json.JSON.encode(params);
-					
-					var loader:URLLoader = new URLLoader();
-					loader.addEventListener(Event.COMPLETE, completeHandler);
-					loader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, securityErrorHandler);
-					loader.addEventListener(HTTPStatusEvent.HTTP_STATUS, httpStatusHandler);
-					loader.addEventListener(IOErrorEvent.IO_ERROR, ioErrorHandler);
-					loader.load(urlRequest);
-					return true;
-				}
-				else {
-					return false;
-				}
-			}
 			
-			protected function completeHandler(evt:Event):void {
-				//result example: {"userName":"lilla","text":"12","xpos":0,"ypos":0,"isVisible":true,"isPortfolio":false,"source":false}
-				var res:Object = com.adobe.serialization.json.JSON.decode(String(evt.target.data));
-				conn.plugin['muc'].sendMessage('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), '{"userName":"'+res.userName+'", "messageType":"'+resourceManager.getString('resources', 'TWEET_POST_SUCCESSFUL')+'"}', null);
-			}
-			
-			protected function securityErrorHandler(evt:SecurityErrorEvent):void {
-				trace("securityErrorHandler");
-			}
-			
-			protected function httpStatusHandler(evt:HTTPStatusEvent):void {
-				trace("httpStatusHandler");
-			}
-			
-			protected function ioErrorHandler(evt:IOErrorEvent):void {
-				trace("ioErrorHandler");
-			}
-			
-			protected function extractOwner(message:String):String {
-				var strongRegExp:RegExp = /RT_(.*?):/;
-				var matches:Object = strongRegExp.exec(message);
-				if(matches != null) {
-					return new String(matches[1]);
-				}
-				else {
-					return "";
-				}
+			/**
+			 *
+			 * Called when the tweetUpdater fails
+			 * 
+			 **/
+			protected function handlePostFailure(evt:HashCreatorEvent):void {
+				//it went tits up, what do we do?
 			}
 			
 			/**
 			 *
-			 * Remove the RT_*: from the message body
+			 * Called when the tweetUpdater fails
 			 * 
 			 **/
-			protected function cleanMessage(message:String):String {
-				var strongRegExp:RegExp = /RT_(.*?):/;
-				return message.replace(strongRegExp, "");
+			protected function handleNoPost(evt:HashCreatorEvent):void {
+				//no valid hash tag found
 			}
 			
+			/**
+			 * 
+			 * Fault Event handler for get energies
+			 * 
+			 **/
+			protected function getEnergies_faultHandler(event:FaultEvent):void {
+				trace("An error occurred ");
+			}
+			
+			/**
+			 * 
+			 * Event handler for get energies
+			 * 
+			 **/
+			protected function getEnergies_resultHandler(event:ResultEvent):void {
+				var res:Object = com.adobe.serialization.json.JSON.decode(String(event.result));
+				hashTags = new Array();
+				for each (var nrj:Object in res) {
+					hashTags.push("#"+nrj.energy);
+				}
+				
+				conn = new XMPP();
+				conn.auto_reconnect = true;
+				conn.setJID(resourceManager.getString('resources', 'TWEET_AGENT')+"@"+resourceManager.getString('resources', 'XMPP_SERVER')+"/"+resourceManager.getString('resources', 'TWEET_AGENT'));
+				conn.setPassword(resourceManager.getString('resources', 'XMPP_CLIENT_DEFAULT_PASSWORD'));
+				conn.setServer(resourceManager.getString('resources', 'XMPP_SERVER'));
+				conn.addEventListener(XMPPEvent.SESSION, handleSession);
+				
+				conn.addPlugin(new MUC());
+				
+				conn.connect();
+			}
 		]]>
 	</fx:Script>
 	
