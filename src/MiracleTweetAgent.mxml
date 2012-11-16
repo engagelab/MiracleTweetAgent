@@ -137,7 +137,6 @@
 				conn.addEventListener(XMPPEvent.SESSION, handleSession);
 				
 				conn.addPlugin(new MUC());
-				
 				conn.connect();
 			}
 		]]>
