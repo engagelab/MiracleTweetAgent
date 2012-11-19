@@ -5,6 +5,7 @@ package listeners
 	public class HashCreatorEvent extends Event
 	{
 		public static const POST_SUCCESSFUL:String = "POST_SUCCESSFUL";
+		public static const QUESTION_POST_SUCCESSFUL = "QUESTION_POST_SUCCESSFUL";
 		public static const POST_FAILED:String = "POST_FAILED";
 		public static const NO_HASH_FOUND:String = "NO_HASH_FOUND";
 		

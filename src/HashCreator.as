@@ -54,6 +54,26 @@ package
 			}
 		}
 		
+		public function postQuestionToService(bdy:String, from:String, questionServiceUrl:String):void {
+			var urlRequest:URLRequest = new URLRequest(questionServiceUrl);
+			urlRequest.method = URLRequestMethod.POST;
+			urlRequest.contentType = "application/json";
+			var params:Object = new Object();
+			params.ownerName = extractOwner(bdy).toLowerCase();
+			params.text = extractContent(bdy);
+			params.xpos = 0;
+			params.ypos = 0;
+			params.taskId = extractTaskId(bdy);
+			urlRequest.data = com.adobe.serialization.json.JSON.encode(params);
+			
+			var loader:URLLoader = new URLLoader();
+			loader.addEventListener(Event.COMPLETE, questionCompleteHandler);
+			loader.addEventListener(HTTPStatusEvent.HTTP_STATUS, httpStatusHandler);
+			loader.addEventListener(IOErrorEvent.IO_ERROR, ioErrorHandler);
+			loader.load(urlRequest);
+		}
+		
+		
 		protected function postTweetForTag(tag:String):void {
 			var extractedOwnerName:String = extractOwner(tweetBody).toLowerCase();
 			
@@ -67,7 +87,6 @@ package
 			params.xpos = 0;
 			params.ypos = 0;
 			params.isVisible = true;
-			params.isPortfolio = false;
 			params.source = false;
 			params.tag = tag.substr(1);
 			urlRequest.data = com.adobe.serialization.json.JSON.encode(params);
@@ -95,6 +114,42 @@ package
 			}
 			
 			return owner;
+		}
+		
+		/**
+		 * 
+		 * Function to return the content of the tweet, based on the JSON object
+		 * 
+		 **/
+		protected function extractContent(message:String):String {
+			var txt:String = "";
+			
+			try {
+				var res:Object = com.adobe.serialization.json.JSON.decode(message);
+				txt = new String(res.text);
+			}
+			catch(error:Error) {
+			}
+			
+			return txt;
+		}
+		
+		/**
+		 * 
+		 * Function to return the taskid of the tweet, based on the JSON object
+		 * 
+		 **/
+		protected function extractTaskId(message:String):String {
+			var tid:String = "";
+			
+			try {
+				var res:Object = com.adobe.serialization.json.JSON.decode(message);
+				tid = new String(res.taskId);
+			}
+			catch(error:Error) {
+			}
+			
+			return tid;
 		}
 		
 		/**
@@ -142,6 +197,17 @@ package
 				var ioev:HashCreatorEvent = new HashCreatorEvent(HashCreatorEvent.NO_HASH_FOUND, true);
 				dispatchEvent(ioev);
 			}
+		}
+		
+		/**
+		 * 
+		 * Event handler for Event.COMPLETE
+		 * 
+		 **/
+		protected function questionCompleteHandler(evt:Event):void {
+			var ioev:HashCreatorEvent = new HashCreatorEvent(HashCreatorEvent.QUESTION_POST_SUCCESSFUL, true);
+			ioev.result = evt.target.data;
+			dispatchEvent(ioev);
 		}
 		
 		/**

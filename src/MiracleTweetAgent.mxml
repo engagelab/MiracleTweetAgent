@@ -34,6 +34,7 @@
 				conn.addEventListener(XMPPEvent.MESSAGE_MUC, handleMUCMessage);
 				conn.plugin['muc'].joinRoom('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_ROOM_NAME'), resourceManager.getString('resources', 'TWEET_AGENT'));
 				conn.plugin['muc'].joinRoom('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), resourceManager.getString('resources', 'TWEET_AGENT'));
+				conn.plugin['muc'].joinRoom('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'QUESTIONS_ROOM_NAME'), resourceManager.getString('resources', 'TWEET_AGENT'));
 			}
 			
 			private function handleMUCMessage(e:XMPPEvent):void {
@@ -72,10 +73,46 @@
 						}
 						break;
 					
-					case resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'):
+					case resourceManager.getString('resources', 'QUESTIONS_ROOM_NAME'):
+						//extract some variables from the XMPP message
+						var roomjid:JID = JID(e.stanza.from);
+						var mess:String = "Message: from "+ e.stanza.from + "\n**********************";
 						
+						var cstate:String = null;
+						var newMess:Boolean = true;
+						
+						//check whether the message is "old" or is of type "system"
+						if(roomjid.getResource() != "") {
+							var xm:XML = e.stanza.xml as XML;
+							for each (var i:XML in xm.elements()) {
+								if(i.name() == "urn:xmpp:delay::delay") {
+									newMess = false;
+								}
+							}
+						}
+						else {
+							cstate = "system";
+						}
+						
+						if(cstate != "system" && newMess) {
+							var hc:HashCreator = new HashCreator();
+							hc.addEventListener(HashCreatorEvent.QUESTION_POST_SUCCESSFUL, handleQuestionPostSuccessful);
+							hc.addEventListener(HashCreatorEvent.POST_FAILED, handlePostFailure);
+							hc.addEventListener(HashCreatorEvent.NO_HASH_FOUND, handleNoPost);
+							hc.postQuestionToService(new String(e.stanza.body), new String(e.stanza.from.resource), resourceManager.getString('resources', 'TWEET_SERVER_URL')+"/question");
+						}
 						break;
 				}
+			}
+			
+			/**
+			 *
+			 * Called when the questionUpdater is successful
+			 * 
+			 **/
+			protected function handleQuestionPostSuccessful(evt:HashCreatorEvent):void {
+				var res:Object = com.adobe.serialization.json.JSON.decode(new String(evt.result));
+				conn.plugin['muc'].sendMessage('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), '{"taskId":"'+res.taskId+'", "messageType":"'+resourceManager.getString('resources', 'QUESTION_POST_SUCCESSFUL')+'"}', null);
 			}
 			
 			/**
@@ -84,7 +121,6 @@
 			 * 
 			 **/
 			protected function handlePostSuccessful(evt:HashCreatorEvent):void {
-				//we're happy, it worked
 				var res:Object = com.adobe.serialization.json.JSON.decode(new String(evt.result));
 				conn.plugin['muc'].sendMessage('conference.'+resourceManager.getString('resources', 'XMPP_SERVER'), resourceManager.getString('resources', 'TWEETS_COMMUNICATION_ROOM_NAME'), '{"tag":"'+res.tag+'", "messageType":"'+resourceManager.getString('resources', 'TWEET_POST_SUCCESSFUL')+'"}', null);
 			}
