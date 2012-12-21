@@ -3,7 +3,7 @@
 	<id>no.uio.intermedia.MiracleTweetAgent</id>
 	<filename>MiracleTweetAgent</filename>
 	<name>MiracleTweetAgent</name>
-	<versionNumber>1.0.0</versionNumber>
+	<versionNumber>1.0.2</versionNumber>
 	<initialWindow>
 		<content>[This value will be overwritten by Flash Builder in the output app.xml]</content>
 	<autoOrients>false</autoOrients>
